@@ -30,6 +30,16 @@ Any standard ESP32 dev board (ESP32-WROOM/WROVER, ESP32-C3, etc.), USB power.
 No other components required. Optional later additions: buzzer/LED on a GPIO
 for an on-site alarm, or a small e-paper display.
 
+If you want a simple on-device status light, wire three external LEDs through
+330-1k resistors to the GPIOs used in `HoF_Alert.ino`:
+
+- green = `LED_OK_PIN`
+- amber = `LED_WARN_PIN`
+- red = `LED_ALERT_PIN`
+
+Each LED is active HIGH. Change the pin numbers in the sketch if your board
+uses those GPIOs for something else.
+
 ## Build & flash
 
 1. Arduino IDE (or arduino-cli) with the **Arduino-ESP32 core 3.x** installed.
@@ -42,7 +52,7 @@ for an on-site alarm, or a small e-paper display.
 
 1. The device broadcasts a Wi-Fi network **EA-HOF-Setup**. Join it and the
    captive portal will ask for your home/site Wi-Fi credentials.
-2. Once connected, browse to **http://ea-hof.local** (or the IP printed on the
+2. Once connected, browse to [http://ea-hof.local](http://ea-hof.local) (or the IP printed on the
    Serial monitor at 115200 baud).
 3. Install the **ntfy** app on your phone, subscribe to a topic of your choice
    (pick something unguessable), enter the same topic on the setup page and
@@ -54,6 +64,22 @@ for an on-site alarm, or a small e-paper display.
    (e.g. `250 l/s`), pick a warning margin, and **Save & start monitoring**.
    The first poll runs immediately and the status board shows
    armed / warned / TRIGGERED per site.
+
+## Trend language
+
+Trend labels are deliberately coarse and tuned for the cadence of EA readings.
+They are based on the change between the last two successful polls and group
+movement into practical bands rather than raw arithmetic detail:
+
+- `steady`: the reading has barely moved.
+- `nudging up` / `nudging down`: a small change.
+- `moving up` / `moving down`: a clear change, but not yet aggressive.
+- `rising briskly` / `falling briskly`: a material shift.
+- `rising fast` / `falling fast`: a large change that deserves attention.
+
+The UI shows both the band label and a short rate note so you can see whether
+the gauge is drifting, moving, or shifting quickly without overloading the
+display with numbers.
 
 To change the station later, open the page and run a new search — saving
 overwrites the previous configuration and resets alert states.

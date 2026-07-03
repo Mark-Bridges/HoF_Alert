@@ -58,6 +58,15 @@ button:disabled{opacity:.5;cursor:default}
 .board .state{font-weight:700;letter-spacing:.03em}
 .state.armed{color:var(--ok)}.state.warned{color:var(--warn)}
 .state.TRIGGERED{color:var(--alert)}
+.state.good{color:var(--ok)}.state.warn{color:var(--warn)}.state.bad{color:var(--alert)}
+.badge{display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:2px 8px;
+  border-radius:999px;border:1px solid var(--line);font-size:.78rem;font-weight:600;
+  text-transform:uppercase;letter-spacing:.06em;vertical-align:middle}
+.dot{width:8px;height:8px;border-radius:50%}
+.badge.good{background:#edf7ef;color:var(--ok)} .badge.good .dot{background:var(--ok)}
+.badge.warn{background:#fff6dd;color:var(--warn)} .badge.warn .dot{background:var(--warn)}
+.badge.bad{background:#fdeceb;color:var(--alert)} .badge.bad .dot{background:var(--alert)}
+.badge.neutral{background:#edf2f1;color:var(--mut)} .badge.neutral .dot{background:var(--mut)}
 .linkish{background:none;border:none;color:var(--river-deep);cursor:pointer;
   padding:0;text-decoration:underline;font-size:.9rem}
 footer{color:var(--mut);font-size:.78rem;margin-top:24px}
@@ -292,9 +301,23 @@ async function refreshStatus(){
       const div=document.createElement('div'); div.className='board';
       const age=s.readingAge!=null?`${Math.round(s.readingAge/60)} min ago`:'no reading yet';
       const val=s.licenceVal!=null?`${(+s.licenceVal).toPrecision(4)} ${s.licenceUnit}`:'—';
+      const prev=s.prevLicenceVal!=null?`${(+s.prevLicenceVal).toPrecision(4)} ${s.licenceUnit}`:'—';
+      const delta=(s.licenceVal!=null&&s.prevLicenceVal!=null&&s.readingAge!=null)
+        ? ((+s.licenceVal)-(+s.prevLicenceVal)).toPrecision(4):null;
+      const deltaText=delta==null?'':(delta>0?`+${delta}`:delta);
+      const trendClass=s.trendState||'neutral';
+      const bandClass=s.bandState||'neutral';
+      const trendLabel=s.trend||'steady';
+      const trendDetail=s.trendDetail||'no trend yet';
+      const bandLabel=s.band||'no reading yet';
       div.innerHTML=`<div class="stripe"></div><div class="body">
-        <div><strong>${s.label}</strong> — <span class="state ${s.state}">${s.state}${s.stale?' · DATA STALE':''}</span></div>
-        <div class="hint">Latest: ${val} (${age})</div></div>`;
+        <div><strong>${s.label}</strong> — <span class="state ${s.state}">${s.stateLabel??s.state}${s.stale?' · DATA STALE':''}</span></div>
+        <div style="margin-top:6px">
+          <span class="badge ${bandClass}"><span class="dot"></span>${bandLabel}</span>
+          <span class="badge ${trendClass}"><span class="dot"></span>${trendLabel}</span>
+        </div>
+        <div class="hint">Current: ${val} (${age}) · Prior: ${prev}${deltaText?` · Δ ${deltaText}`:''}</div>
+        <div class="hint">Band: ${s.band??'—'} · Trend: ${trendDetail}</div></div>`;
       b.appendChild(div);
     });
     document.getElementById('statusMeta').textContent=

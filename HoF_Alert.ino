@@ -48,6 +48,9 @@ static const uint32_t POLL_INTERVAL_MS   = 15UL * 60UL * 1000UL; // EA updates ~
 static const uint32_t STALE_AFTER_SECS   = 3UL * 60UL * 60UL;    // default: 3 hours
 static const uint8_t  MAX_SITES          = 2;                    // hook for a second licence point
 static const uint8_t  MAX_CONSEC_FAILS   = 8;                    // reboot after ~2 h of failed polls
+static const int8_t   LED_OK_PIN         = 16;                   // external green LED, active HIGH
+static const int8_t   LED_WARN_PIN       = 17;                   // external amber LED, active HIGH
+static const int8_t   LED_ALERT_PIN      = 18;                   // external red LED, active HIGH
 static const char*    EA_HOST            = "environment.data.gov.uk";
 static const char*    NTFY_HOST          = "https://ntfy.sh/";
 static const char*    HOSTNAME           = "ea-hof";
@@ -69,7 +72,9 @@ struct Site {
   SiteState state      = ARMED;
   bool    staleNotified = false;
   float   lastValue    = NAN;
+  float   prevValue    = NAN;
   time_t  lastReading  = 0;
+  time_t  prevReading  = 0;
   bool    everPolled   = false;
 };
 
@@ -115,6 +120,92 @@ String fmtVal(const Site& s, float nativeVal) {
   if (s.licenceUnit == "m") snprintf(buf, sizeof(buf), "%.3f %s", v, s.licenceUnit.c_str());
   else                      snprintf(buf, sizeof(buf), "%.1f %s", v, s.licenceUnit.c_str());
   return String(buf);
+}
+
+void setLedStates(bool okOn, bool warnOn, bool alertOn) {
+  if (LED_OK_PIN >= 0)   digitalWrite(LED_OK_PIN, okOn ? HIGH : LOW);
+  if (LED_WARN_PIN >= 0) digitalWrite(LED_WARN_PIN, warnOn ? HIGH : LOW);
+  if (LED_ALERT_PIN >= 0) digitalWrite(LED_ALERT_PIN, alertOn ? HIGH : LOW);
+}
+
+void refreshStatusOutputs() {
+  bool okOn = false, warnOn = false, alertOn = false;
+  for (auto& s : sites) {
+    if (!s.enabled) continue;
+    if (s.staleNotified || s.state == TRIGGERED) {
+      alertOn = true;
+    } else if (s.state == WARNED) {
+      warnOn = true;
+    } else if (s.state == ARMED && s.everPolled) {
+      okOn = true;
+    }
+  }
+  setLedStates(okOn, warnOn, alertOn);
+}
+
+String trendLabel(const Site& s) {
+  if (!s.everPolled || isnan(s.prevValue) || isnan(s.lastValue) || s.prevReading == 0 || s.lastReading <= s.prevReading) {
+    return "steady";
+  }
+  float delta = s.lastValue - s.prevValue;
+  float span  = (float)(s.lastReading - s.prevReading);
+  if (span <= 0) return "steady";
+  float ref = fabsf(s.prevValue);
+  float frac = ref > 0.0001f ? fabsf(delta) / ref : fabsf(delta);
+  float perHour = fabsf(delta) / (span / 3600.0f);
+  bool rising = delta > 0;
+  if (frac < 0.0025f && perHour < 0.01f) return "steady";
+  if (frac < 0.01f  && perHour < 0.03f) return rising ? "nudging up" : "nudging down";
+  if (frac < 0.03f  && perHour < 0.08f) return rising ? "moving up" : "moving down";
+  if (frac < 0.08f  && perHour < 0.18f) return rising ? "rising briskly" : "falling briskly";
+  return rising ? "rising fast" : "falling fast";
+}
+
+String trendDetail(const Site& s) {
+  if (!s.everPolled || isnan(s.prevValue) || isnan(s.lastValue) || s.prevReading == 0 || s.lastReading <= s.prevReading) {
+    return "no trend yet";
+  }
+  float delta = s.lastValue - s.prevValue;
+  float span  = (float)(s.lastReading - s.prevReading);
+  float perHour = delta / (span / 3600.0f);
+  float per6h = perHour * 6.0f;
+  char buf[64];
+  snprintf(buf, sizeof(buf), "%+.3f %s/hr (%+.3f %s/6h)",
+           perHour, s.nativeUnit.c_str(), per6h, s.nativeUnit.c_str());
+  return String(buf);
+}
+
+String stateLabel(const Site& s) {
+  if (!s.everPolled) return "waiting";
+  if (s.staleNotified) return "data stale";
+  if (s.state == TRIGGERED) return "HOF active";
+  if (s.state == WARNED) return "inside warning";
+  return "armed";
+}
+
+String bandLabel(const Site& s) {
+  if (!s.everPolled || isnan(s.lastValue)) return "no reading yet";
+  bool pastTrigger, pastWarn;
+  if (s.below) { pastTrigger = s.lastValue <= s.trigger; pastWarn = s.lastValue <= s.warnAt; }
+  else         { pastTrigger = s.lastValue >= s.trigger; pastWarn = s.lastValue >= s.warnAt; }
+  if (pastTrigger) return "at/over trigger";
+  if (pastWarn) return "inside warning band";
+  return "clear of warning band";
+}
+
+String trendState(const Site& s) {
+  if (s.staleNotified) return "stale";
+  String t = trendLabel(s);
+  if (t == "rising fast" || t == "rising briskly" || t == "moving up" || t == "nudging up") return "good";
+  if (t == "falling fast" || t == "falling briskly" || t == "moving down" || t == "nudging down") return "bad";
+  return "neutral";
+}
+
+String bandState(const Site& s) {
+  if (s.staleNotified) return "bad";
+  if (s.state == TRIGGERED) return "bad";
+  if (s.state == WARNED) return "warn";
+  return "good";
 }
 
 // ---------------------------------------------------------------- ntfy push
@@ -165,6 +256,8 @@ bool fetchLatest(Site& s, float& valueOut, time_t& whenOut) {
 
 // ---------------------------------------------------------------- state machine
 void evaluateSite(Site& s, float v, time_t when) {
+  s.prevValue   = s.lastValue;
+  s.prevReading = s.lastReading;
   s.lastValue   = v;
   s.lastReading = when;
   s.everPolled  = true;
@@ -224,6 +317,7 @@ void evaluateSite(Site& s, float v, time_t when) {
   }
   s.state = newState;
   saveRuntimeState();
+  refreshStatusOutputs();
 }
 
 // ---------------------------------------------------------------- persistence
@@ -300,6 +394,7 @@ void handleSave() {
   // Reset alert states for a fresh config and poll immediately.
   for (auto& s : sites) { s.state = ARMED; s.staleNotified = false; s.everPolled = false; }
   saveRuntimeState();
+  refreshStatusOutputs();
   server.send(200, "application/json", "{\"ok\":true}");
   lastPoll = 0; // force poll on next loop
 }
@@ -323,11 +418,20 @@ void handleStatus() {
     JsonObject o = arr.add<JsonObject>();
     o["label"] = s.label;
     o["state"] = names[s.state];
+    o["stateLabel"] = stateLabel(s);
     o["stale"] = s.staleNotified;
+    o["trend"] = trendLabel(s);
+    o["trendDetail"] = trendDetail(s);
+    o["trendState"] = trendState(s);
+    o["band"] = bandLabel(s);
+    o["bandState"] = bandState(s);
     if (s.everPolled) {
       o["value"]       = s.lastValue;                 // native units
       o["licenceVal"]  = toLicenceUnits(s, s.lastValue);
+      o["prevLicenceVal"] = toLicenceUnits(s, s.prevValue);
       o["licenceUnit"] = s.licenceUnit;
+      o["nativeUnit"]  = s.nativeUnit;
+      o["param"]       = s.param;
       o["readingAge"]  = (long)(time(nullptr) - s.lastReading);
     }
   }
@@ -360,6 +464,11 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
+  if (LED_OK_PIN >= 0)   pinMode(LED_OK_PIN, OUTPUT);
+  if (LED_WARN_PIN >= 0) pinMode(LED_WARN_PIN, OUTPUT);
+  if (LED_ALERT_PIN >= 0) pinMode(LED_ALERT_PIN, OUTPUT);
+  setLedStates(false, false, false);
+
   WiFiManager wm;
   wm.setHostname(HOSTNAME);
   wm.setConfigPortalTimeout(300);
@@ -379,6 +488,7 @@ void setup() {
   server.begin();
 
   lastPoll = 0; // poll straight away once configured
+  refreshStatusOutputs();
 }
 
 void loop() {

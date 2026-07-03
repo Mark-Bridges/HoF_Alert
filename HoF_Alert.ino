@@ -278,7 +278,10 @@ void evaluateSite(Site& s, float v, time_t when) {
              "Fresh readings are arriving again. Current: " + fmtVal(s, v) + ".",
              3, "white_check_mark");
   }
-  if (stale) return; // don't act on old numbers
+  if (stale) {
+    refreshStatusOutputs();
+    return; // don't act on old numbers
+  }
 
   // --- threshold comparison (direction-aware) ------------------------------
   bool pastTrigger, pastWarn;
@@ -293,7 +296,11 @@ void evaluateSite(Site& s, float v, time_t when) {
   //  the warning margin doubles as the deadband, so a river hovering at the
   //  trigger doesn't generate an alert every 15 minutes.)
 
-  if (newState == s.state) { saveRuntimeState(); return; }
+  if (newState == s.state) {
+    saveRuntimeState();
+    refreshStatusOutputs();
+    return;
+  }
 
   String dir = s.below ? "below" : "above";
   if (newState == TRIGGERED) {
@@ -417,6 +424,7 @@ void handleStatus() {
     if (!s.enabled) continue;
     JsonObject o = arr.add<JsonObject>();
     o["label"] = s.label;
+    o["measureId"] = s.measureId;
     o["state"] = names[s.state];
     o["stateLabel"] = stateLabel(s);
     o["stale"] = s.staleNotified;

@@ -40,6 +40,10 @@ If you want a simple on-device status light, wire three external LEDs through
 Each LED is active HIGH. Change the pin numbers in the sketch if your board
 uses those GPIOs for something else.
 
+Tip: avoid strapping pins for indicator LEDs where possible. On many ESP32
+boards GPIO15 is a boot strap pin, so prefer non-strap outputs such as
+GPIO16, GPIO17, GPIO18, GPIO19, GPIO21, GPIO22, GPIO23, GPIO25-27, GPIO32-33.
+
 ## Build & flash
 
 1. Arduino IDE (or arduino-cli) with the **Arduino-ESP32 core 3.x** installed.
@@ -64,6 +68,31 @@ uses those GPIOs for something else.
    (e.g. `250 l/s`), pick a warning margin, and **Save & start monitoring**.
    The first poll runs immediately and the status board shows
    armed / warned / TRIGGERED per site.
+
+If you later move the device to a place where the saved Wi-Fi is not
+available, it will fall back to the **EA-HOF-Setup** captive portal on boot so
+you can enter new Wi-Fi credentials. The saved station and notification
+settings remain intact, so no separate reset or re-register flow is needed for
+normal use.
+
+## Web UI navigation
+
+- **Monitor** is the landing view once a valid configuration is saved.
+- **Settings** contains notifications and station setup.
+- If settings are incomplete (no topic or station), the UI opens on
+  **Settings** automatically.
+
+Wi-Fi configuration is separate from the station/alert setup. If the device
+cannot reach the previously saved network, it starts the Wi-Fi setup portal
+again without clearing the monitoring configuration.
+
+The Monitor view now includes expanded per-station trend cards for:
+
+- **7 day trend** (change, percent change, and range)
+- **30 day trend** (change, percent change, and range)
+
+These are fetched directly from the EA API reading history in the browser,
+so the device does not store long-term history itself.
 
 ## Trend language
 

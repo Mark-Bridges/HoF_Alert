@@ -228,6 +228,15 @@ async function fetchSeries(measureId,sinceIso){
   if(!r.ok)throw new Error('history fetch failed');
   const d=await r.json();
   const items=Array.isArray(d.items)?d.items:[];
+  // Keep chart direction deterministic: oldest (left) -> latest (right).
+  items.sort((a,b)=>{
+    const ta=Date.parse(a&&a.dateTime?a.dateTime:'');
+    const tb=Date.parse(b&&b.dateTime?b.dateTime:'');
+    if(!Number.isFinite(ta) && !Number.isFinite(tb)) return 0;
+    if(!Number.isFinite(ta)) return 1;
+    if(!Number.isFinite(tb)) return -1;
+    return ta-tb;
+  });
   return items.map(it=>+it.value).filter(v=>Number.isFinite(v));
 }
 

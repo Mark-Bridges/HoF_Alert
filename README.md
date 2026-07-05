@@ -91,8 +91,17 @@ The Monitor view now includes expanded per-station trend cards for:
 - **7 day trend** (change, percent change, and range)
 - **30 day trend** (change, percent change, and range)
 
+It also shows the configured HoF settings in plain view:
+
+- A monitor overview line listing each station trigger and direction
+  (falls below / rises above).
+- A per-station line showing HoF trigger and warning threshold values.
+
 These are fetched directly from the EA API reading history in the browser,
 so the device does not store long-term history itself.
+
+Trend cards and sparkline are shown in licence units for consistency with the
+rest of the Monitor panel.
 
 ## Trend language
 
@@ -109,6 +118,20 @@ movement into practical bands rather than raw arithmetic detail:
 The UI shows both the band label and a short rate note so you can see whether
 the gauge is drifting, moving, or shifting quickly without overloading the
 display with numbers.
+
+In the trend cards, **Period range (lowest to highest)** means exactly that:
+the minimum and maximum readings seen over that period.
+
+In the 30-day sparkline, the chart direction is chronological:
+
+- left = oldest reading
+- right = latest reading
+
+The sparkline also includes threshold context:
+
+- green segments = safe side of trigger
+- red segments = alert side of trigger
+- dashed line = trigger level
 
 To change the station later, open the page and run a new search — saving
 overwrites the previous configuration and resets alert states.

@@ -433,6 +433,9 @@ void handleStatus() {
     o["trendState"] = trendState(s);
     o["band"] = bandLabel(s);
     o["bandState"] = bandState(s);
+    o["below"] = s.below;
+    o["triggerLicence"] = toLicenceUnits(s, s.trigger);
+    o["warnAtLicence"] = toLicenceUnits(s, s.warnAt);
     if (s.everPolled) {
       o["value"]       = s.lastValue;                 // native units
       o["licenceVal"]  = toLicenceUnits(s, s.lastValue);

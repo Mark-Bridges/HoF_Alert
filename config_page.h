@@ -87,8 +87,11 @@ button:disabled{opacity:.5;cursor:default}
 .spark-wrap{margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#f8fbfa}
 .spark-head{display:flex;justify-content:space-between;gap:8px;font-size:.78rem;color:var(--mut);margin-bottom:5px}
 .sparkline{width:100%;height:52px;display:block}
-.sparkline .line{fill:none;stroke:var(--river-deep);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.sparkline .line-good{stroke:var(--ok)}
+.sparkline .line-bad{stroke:var(--alert)}
+.sparkline .seg{fill:none;stroke-width:2.2;stroke-linecap:round}
 .sparkline .base{stroke:#d8e3e1;stroke-width:1}
+.sparkline .threshold{stroke:var(--line);stroke-width:1.2;stroke-dasharray:2 2}
 .spark-empty{font-size:.8rem;color:var(--mut)}
 footer{color:var(--mut);font-size:.78rem;margin-top:24px}
 @media (max-width:760px){
@@ -114,6 +117,7 @@ footer{color:var(--mut);font-size:.78rem;margin-top:24px}
   <div class="card">
     <h2>Monitoring overview</h2>
     <p class="hint" id="monitorIntro">Live status, trend and alert-band state for each configured station.</p>
+    <p class="hint" id="hofOverview"></p>
   </div>
 </div>
 
@@ -199,6 +203,25 @@ function windowSummary(values){
   };
 }
 
+function summaryFromValues(values){
+  return windowSummary(values||[]);
+}
+
+function nativeToLicenceValue(site,v){
+  if(v==null||!Number.isFinite(v)) return null;
+  if(site&&site.licenceUnit==='l/s' && (site.nativeUnit==='m3/s'||site.param==='flow')) return v*1000;
+  return v;
+}
+
+function toLicenceSeries(site,values){
+  const out=[];
+  for(const v of (values||[])){
+    const cv=nativeToLicenceValue(site,v);
+    if(Number.isFinite(cv)) out.push(cv);
+  }
+  return out;
+}
+
 async function fetchSeries(measureId,sinceIso){
   const u=`${EA}/id/measures/${measureId}/readings?since=${encodeURIComponent(sinceIso)}&_sorted&_limit=5000`;
   const r=await fetch(u);
@@ -249,7 +272,7 @@ function histHtml(title,summary,unit){
     <div class="k">${title}</div>
     <div class="v">${headline}</div>
     <div class="sub">Change ${fmtAbsDelta(summary.delta,unit,dp)} · ${pctText}</div>
-    <div class="sub">Range ${fmtWithUnit(summary.min,unit,dp)} to ${fmtWithUnit(summary.max,unit,dp)} · ${summary.count} readings</div>
+    <div class="sub">Period range (lowest to highest): ${fmtWithUnit(summary.min,unit,dp)} to ${fmtWithUnit(summary.max,unit,dp)} · ${summary.count} readings</div>
   </div>`;
 }
 
@@ -263,25 +286,32 @@ function downsample(values,maxPts){
   return out;
 }
 
-function sparklineHtml(values,unit){
+function sparklineHtml(values,unit,trigger,below){
   if(!values||values.length<2){
     return `<div class="spark-wrap"><div class="spark-head"><span>30 day shape</span><span>Not enough data</span></div><div class="spark-empty">Sparkline appears once more readings are available.</div></div>`;
   }
   const pts=downsample(values,56);
   let min=pts[0],max=pts[0];
   for(const v of pts){if(v<min)min=v;if(v>max)max=v;}
+  if(Number.isFinite(trigger)){ if(trigger<min)min=trigger; if(trigger>max)max=trigger; }
   const span=(max-min)||1;
-  const points=pts.map((v,i)=>{
-    const x=(i/(pts.length-1))*100;
-    const y=100-((v-min)/span)*100;
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(' ');
+  const xy=pts.map((v,i)=>({x:(i/(pts.length-1))*100,y:100-((v-min)/span)*100,v:v}));
+  const segments=[];
+  for(let i=1;i<xy.length;i++){
+    const a=xy[i-1], b=xy[i];
+    const mid=(a.v+b.v)/2;
+    const bad=Number.isFinite(trigger) ? (below ? mid<=trigger : mid>=trigger) : false;
+    const cls=bad?'line-bad':'line-good';
+    segments.push(`<line class="seg ${cls}" x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}"></line>`);
+  }
+  const thresholdY=Number.isFinite(trigger)?(100-((trigger-min)/span)*100):null;
   const dp=unitDp(unit);
   return `<div class="spark-wrap">
-    <div class="spark-head"><span>30 day shape</span><span>${fmtWithUnit(pts[0],unit,dp)} -> ${fmtWithUnit(pts[pts.length-1],unit,dp)}</span></div>
+    <div class="spark-head"><span>30 day shape</span><span>${fmtWithUnit(pts[0],unit,dp)} -> ${fmtWithUnit(pts[pts.length-1],unit,dp)} (oldest to latest)</span></div>
     <svg class="sparkline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
       <line class="base" x1="0" y1="100" x2="100" y2="100"></line>
-      <polyline class="line" points="${points}"></polyline>
+      ${thresholdY!=null?`<line class="threshold" x1="0" y1="${thresholdY.toFixed(2)}" x2="100" y2="${thresholdY.toFixed(2)}"></line>`:''}
+      ${segments.join('')}
     </svg>
   </div>`;
 }
@@ -482,9 +512,11 @@ async function refreshStatus(){
     document.getElementById('emptyMonitor').hidden=!!d.haveConfig;
     if(!d.haveConfig){
       if(currentView==='monitor') document.getElementById('monitorIntro').textContent='No active monitor yet. Configure stations and notifications in Settings.';
+      document.getElementById('hofOverview').textContent='';
       return;
     }
     document.getElementById('monitorIntro').textContent='Live status, trend and alert-band state for each configured station.';
+    const overview=[];
     const b=document.getElementById('boards'); b.innerHTML='';
     for(const s of d.sites){
       const div=document.createElement('div'); div.className='board';
@@ -501,9 +533,20 @@ async function refreshStatus(){
       const bandLabel=s.band||'no reading yet';
       const hist=await getLongTrend(s.measureId);
       const trendUnit=s.licenceUnit||s.nativeUnit||'';
-      const weekHtml=histHtml('7 day trend',hist&&hist.week,trendUnit);
-      const monthHtml=histHtml('30 day trend',hist&&hist.month,trendUnit);
-      const sparkHtml=sparklineHtml(hist&&hist.monthValues,trendUnit);
+      const monthSeries=toLicenceSeries(s,hist&&hist.monthValues);
+      const weekCount=hist&&hist.week&&Number.isFinite(hist.week.count)?hist.week.count:0;
+      const weekSeries=weekCount>0?monthSeries.slice(Math.max(0,monthSeries.length-weekCount)):[];
+      const weekSummary=summaryFromValues(weekSeries);
+      const monthSummary=summaryFromValues(monthSeries);
+      const triggerVal=Number.isFinite(s.triggerLicence)?+s.triggerLicence:null;
+      const warnVal=Number.isFinite(s.warnAtLicence)?+s.warnAtLicence:null;
+      const weekHtml=histHtml('7 day trend',weekSummary,trendUnit);
+      const monthHtml=histHtml('30 day trend',monthSummary,trendUnit);
+      const sparkHtml=sparklineHtml(monthSeries,trendUnit,triggerVal,!!s.below);
+      const relation=s.below?'below':'above';
+      const triggerTxt=fmtWithUnit(triggerVal,trendUnit,unitDp(trendUnit));
+      const warnTxt=fmtWithUnit(warnVal,trendUnit,unitDp(trendUnit));
+      overview.push(`${s.label}: trigger ${triggerTxt} (${relation})`);
       div.innerHTML=`<div class="stripe"></div><div class="body">
         <div><strong>${s.label}</strong> — <span class="state ${s.state}">${s.stateLabel??s.state}${s.stale?' · DATA STALE':''}</span></div>
         <div style="margin-top:6px">
@@ -511,11 +554,13 @@ async function refreshStatus(){
           <span class="badge ${trendClass}"><span class="dot"></span>${trendLabel}</span>
         </div>
         <div class="hint">Current: ${val} (${age}) · Prior: ${prev}${deltaText?` · Δ ${deltaText}`:''}</div>
+        <div class="hint">HoF trigger: ${triggerTxt} (${relation}) · Warning threshold: ${warnTxt}</div>
         <div class="hint">Band: ${s.band??'—'} · Trend: ${trendDetail}</div>
         <div class="hist-grid">${weekHtml}${monthHtml}</div>
         ${sparkHtml}</div>`;
       b.appendChild(div);
     }
+    document.getElementById('hofOverview').textContent=overview.length?`Configured HoF thresholds: ${overview.join(' | ')}`:'';
     document.getElementById('statusMeta').textContent=
       `Up ${d.uptimeMin} min · next check in ${Math.max(0,Math.round(d.nextPollS/60))} min`;
   }catch(e){}

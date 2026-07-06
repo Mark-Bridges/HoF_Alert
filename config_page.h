@@ -172,7 +172,16 @@ let hasSavedConfig=false;
 const longTrendCache={};
 const LONG_TREND_TTL_MS=30*60*1000;
 
-function unitDp(unit){return unit==='m'?3:1;}
+function unitDp(unit){return unit==='m'||unit==='m3/s'?3:1;}
+
+function isFlowUnit(unit){
+  const u=(unit||'').toLowerCase();
+  return u==='m3/s'||u==='m³/s'||u.includes('cubic');
+}
+
+function isFlowSite(site){
+  return !!site&&(site.param==='flow'||isFlowUnit(site.nativeUnit));
+}
 
 function fmtWithUnit(v,unit,dp){
   if(v==null||!Number.isFinite(v))return '—';
@@ -209,7 +218,7 @@ function summaryFromValues(values){
 
 function nativeToLicenceValue(site,v){
   if(v==null||!Number.isFinite(v)) return null;
-  if(site&&site.licenceUnit==='l/s' && (site.nativeUnit==='m3/s'||site.param==='flow')) return v*1000;
+  if(site&&site.licenceUnit==='l/s'&&isFlowSite(site)) return v*1000;
   return v;
 }
 
@@ -433,7 +442,7 @@ async function chooseMeasure(i,st,m){
   cfg.sites[i]=Object.assign(cfg.sites[i]||{},s);
   // unit choices for the licence value
   const u=document.getElementById('unit'+i); u.innerHTML='';
-  (m.parameter==='flow'?['l/s','m3/s']:['m']).forEach(x=>{
+  (isFlowSite(s)?['l/s','m3/s']:['m']).forEach(x=>{
     u.appendChild(new Option(x==='m3/s'?'m³/s':x,x));});
   document.getElementById('thr'+i).hidden=false;
   updateConv(i);
@@ -451,7 +460,7 @@ async function chooseMeasure(i,st,m){
 function toNative(i,val){
   const unit=document.getElementById('unit'+i).value;
   const s=cfg.sites[i];
-  if(unit==='l/s'&&s.param==='flow')return val/1000;
+  if(unit==='l/s'&&isFlowSite(s))return val/1000;
   return val;
 }
 function updateConv(i){

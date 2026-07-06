@@ -142,6 +142,10 @@ Firmware and config schema support two sites (each with independent alert
 state and its own notifications). The setup page keeps the second slot behind
 an "Add a second station" link since most licences reference a single gauge.
 
+If the second station is a flow-rate condition, choose the station's **flow**
+measure in the measure picker. Flow measures offer `l/s` and `m³/s` as licence
+unit options; level measures offer `m`.
+
 ## Notes & caveats
 
 - **TLS**: requests use `setInsecure()` (no certificate validation) for

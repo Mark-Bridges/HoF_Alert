@@ -107,8 +107,12 @@ time_t parseIso8601Z(const char* s) {
 }
 
 // Convert a native-unit value into licence units for human-readable messages.
+bool isCubicMetresPerSecond(const String& unit) {
+  return unit == "m3/s" || unit == "m³/s";
+}
+
 float toLicenceUnits(const Site& s, float nativeVal) {
-  if (s.licenceUnit == "l/s" && (s.nativeUnit == "m3/s" || s.param == "flow"))
+  if (s.licenceUnit == "l/s" && (isCubicMetresPerSecond(s.nativeUnit) || s.param == "flow"))
     return nativeVal * 1000.0f;
   return nativeVal;
 }
@@ -116,9 +120,9 @@ float toLicenceUnits(const Site& s, float nativeVal) {
 String fmtVal(const Site& s, float nativeVal) {
   float v = toLicenceUnits(s, nativeVal);
   char buf[32];
-  // l/s values are big-ish; levels want 3 dp
-  if (s.licenceUnit == "m") snprintf(buf, sizeof(buf), "%.3f %s", v, s.licenceUnit.c_str());
-  else                      snprintf(buf, sizeof(buf), "%.1f %s", v, s.licenceUnit.c_str());
+  // l/s values are big-ish; levels and m3/s flows need 3 dp.
+  if (s.licenceUnit == "m" || s.licenceUnit == "m3/s") snprintf(buf, sizeof(buf), "%.3f %s", v, s.licenceUnit.c_str());
+  else                                                 snprintf(buf, sizeof(buf), "%.1f %s", v, s.licenceUnit.c_str());
   return String(buf);
 }
 
@@ -255,7 +259,7 @@ bool fetchLatest(Site& s, float& valueOut, time_t& whenOut) {
 }
 
 // ---------------------------------------------------------------- state machine
-void evaluateSite(Site& s, float v, time_t when) {
+bool updateSiteReading(Site& s, float v, time_t when) {
   s.prevValue   = s.lastValue;
   s.prevReading = s.lastReading;
   s.lastValue   = v;
@@ -280,8 +284,13 @@ void evaluateSite(Site& s, float v, time_t when) {
   }
   if (stale) {
     refreshStatusOutputs();
-    return; // don't act on old numbers
+    return false; // don't act on old numbers
   }
+  return true;
+}
+
+void evaluateSite(Site& s, float v, time_t when) {
+  if (!updateSiteReading(s, v, when)) return;
 
   // --- threshold comparison (direction-aware) ------------------------------
   bool pastTrigger, pastWarn;

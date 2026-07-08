@@ -15,7 +15,7 @@
  * Libraries (Library Manager):
  *   - ArduinoJson        (Benoit Blanchon)  v7.x
  *   - WiFiManager        (tzapu)            v2.x
- * Board: any ESP32 dev module (Arduino-ESP32 core 3.x)
+ * Board: ESP32-S3-DevKitC-1 N16R8 (Arduino-ESP32 core 3.x)
  *
  * First boot: join Wi-Fi network "EA-HOF-Setup", configure your Wi-Fi,
  * then browse to http://ea-hof.local (or the IP shown on Serial).
@@ -48,9 +48,18 @@ static const uint32_t POLL_INTERVAL_MS   = 15UL * 60UL * 1000UL; // EA updates ~
 static const uint32_t STALE_AFTER_SECS   = 3UL * 60UL * 60UL;    // default: 3 hours
 static const uint8_t  MAX_SITES          = 2;                    // hook for a second licence point
 static const uint8_t  MAX_CONSEC_FAILS   = 8;                    // reboot after ~2 h of failed polls
-static const int8_t   LED_OK_PIN         = 16;                   // external green LED, active HIGH
-static const int8_t   LED_WARN_PIN       = 17;                   // external amber LED, active HIGH
-static const int8_t   LED_ALERT_PIN      = 18;                   // external red LED, active HIGH
+static const bool     USE_BUILTIN_RGB_LED = true;                // ESP32-S3-DevKitC-1 addressable RGB LED
+#ifndef HOF_RGB_LED_PIN
+#if defined(RGB_BUILTIN)
+#define HOF_RGB_LED_PIN RGB_BUILTIN
+#else
+#define HOF_RGB_LED_PIN 38                                      // ESP32-S3-DevKitC-1 v1.1; use 48 for v1.0
+#endif
+#endif
+static const uint8_t  RGB_LED_PIN         = HOF_RGB_LED_PIN;
+static const int8_t   LED_OK_PIN          = -1;                  // optional external green LED, active HIGH
+static const int8_t   LED_WARN_PIN        = -1;                  // optional external amber LED, active HIGH
+static const int8_t   LED_ALERT_PIN       = -1;                  // optional external red LED, active HIGH
 static const char*    EA_HOST            = "environment.data.gov.uk";
 static const char*    NTFY_HOST          = "https://ntfy.sh/";
 static const char*    HOSTNAME           = "ea-hof";
@@ -126,9 +135,20 @@ String fmtVal(const Site& s, float nativeVal) {
   return String(buf);
 }
 
+void setRgbStatus(uint8_t red, uint8_t green, uint8_t blue) {
+  if (USE_BUILTIN_RGB_LED) neopixelWrite(RGB_LED_PIN, red, green, blue);
+}
+
 void setLedStates(bool okOn, bool warnOn, bool alertOn) {
-  if (LED_OK_PIN >= 0)   digitalWrite(LED_OK_PIN, okOn ? HIGH : LOW);
-  if (LED_WARN_PIN >= 0) digitalWrite(LED_WARN_PIN, warnOn ? HIGH : LOW);
+  if (USE_BUILTIN_RGB_LED) {
+    if (alertOn)      setRgbStatus(48, 0, 0);
+    else if (warnOn)  setRgbStatus(48, 28, 0);
+    else if (okOn)    setRgbStatus(0, 32, 0);
+    else              setRgbStatus(0, 0, 0);
+  }
+
+  if (LED_OK_PIN >= 0)    digitalWrite(LED_OK_PIN, okOn ? HIGH : LOW);
+  if (LED_WARN_PIN >= 0)  digitalWrite(LED_WARN_PIN, warnOn ? HIGH : LOW);
   if (LED_ALERT_PIN >= 0) digitalWrite(LED_ALERT_PIN, alertOn ? HIGH : LOW);
 }
 
@@ -484,10 +504,10 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
+  setRgbStatus(0, 0, 24);
   if (LED_OK_PIN >= 0)   pinMode(LED_OK_PIN, OUTPUT);
   if (LED_WARN_PIN >= 0) pinMode(LED_WARN_PIN, OUTPUT);
   if (LED_ALERT_PIN >= 0) pinMode(LED_ALERT_PIN, OUTPUT);
-  setLedStates(false, false, false);
 
   WiFiManager wm;
   wm.setHostname(HOSTNAME);

@@ -26,23 +26,33 @@ level approaches or crosses a Hands-Off Flow / Hands-Off Level condition.
 
 ## Hardware
 
-Any standard ESP32 dev board (ESP32-WROOM/WROVER, ESP32-C3, etc.), USB power.
-No other components required. Optional later additions: buzzer/LED on a GPIO
-for an on-site alarm, or a small e-paper display.
+Target board: **ESP32-S3-DevKitC-1 N16R8**, USB power.
 
-If you want a simple on-device status light, wire three external LEDs through
-330-1k resistors to the GPIOs used in `HoF_Alert.ino`:
+No extra LED hardware is required. The sketch uses the board's built-in
+addressable RGB LED. It uses Arduino's `RGB_BUILTIN` pin when the selected
+board profile provides it, otherwise it defaults to GPIO38 for the current
+ESP32-S3-DevKitC-1 v1.1 hardware.
 
-- green = `LED_OK_PIN`
-- amber = `LED_WARN_PIN`
-- red = `LED_ALERT_PIN`
+If your board is an initial ESP32-S3-DevKitC-1 revision and the LED does not
+light, change `HOF_RGB_LED_PIN` / `RGB_LED_PIN` in `HoF_Alert.ino` to GPIO48.
 
-Each LED is active HIGH. Change the pin numbers in the sketch if your board
-uses those GPIOs for something else.
+LED states:
 
-Tip: avoid strapping pins for indicator LEDs where possible. On many ESP32
-boards GPIO15 is a boot strap pin, so prefer non-strap outputs such as
-GPIO16, GPIO17, GPIO18, GPIO19, GPIO21, GPIO22, GPIO23, GPIO25-27, GPIO32-33.
+- blue = boot / Wi-Fi setup in progress
+- green = configured, polled, and armed
+- amber = inside warning band
+- red = HOF/HOL triggered or gauge data stale
+- off = no saved monitoring config yet
+
+Optional external GPIO LEDs are still supported by changing these constants in
+`HoF_Alert.ino`:
+
+- `LED_OK_PIN`
+- `LED_WARN_PIN`
+- `LED_ALERT_PIN`
+
+Set any unused external LED pin to `-1`. External LEDs are active HIGH and
+should be wired through 330-1k resistors.
 
 ## Build & flash
 
@@ -50,7 +60,14 @@ GPIO16, GPIO17, GPIO18, GPIO19, GPIO21, GPIO22, GPIO23, GPIO25-27, GPIO32-33.
 2. Library Manager → install:
    - **ArduinoJson** (Benoit Blanchon), v7.x
    - **WiFiManager** (tzapu), v2.x
-3. Open `ea_hof_monitor.ino`, select your board, flash.
+3. Open `HoF_Alert.ino`, select **ESP32S3 Dev Module** or the matching
+   **ESP32-S3-DevKitC-1** entry if available, then flash.
+
+Suggested Arduino IDE board settings for ESP32-S3-DevKitC-1 N16R8:
+
+- Flash Size: `16MB`
+- PSRAM: `OPI PSRAM` / enabled
+- USB CDC On Boot: enabled if you want Serial Monitor over the USB port
 
 ## First run
 

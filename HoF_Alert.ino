@@ -60,8 +60,12 @@ static const uint8_t  RGB_LED_PIN         = HOF_RGB_LED_PIN;
 static const int8_t   LED_OK_PIN          = -1;                  // optional external green LED, active HIGH
 static const int8_t   LED_WARN_PIN        = -1;                  // optional external amber LED, active HIGH
 static const int8_t   LED_ALERT_PIN       = -1;                  // optional external red LED, active HIGH
-static const int8_t   BUZZER_PIN          = 4;                  // optional active buzzer/sounder, active HIGH
-static const bool     BUZZER_ACTIVE_HIGH  = true;
+static const int8_t   BUZZER_PIN          = 4;                   // optional buzzer/sounder output
+static const bool     BUZZER_IS_PASSIVE   = true;                // true = ceramic piezo disc, false = active buzzer module
+static const bool     BUZZER_ACTIVE_HIGH  = true;                // active module only
+static const uint32_t BUZZER_TONE_HZ      = 2800;                // passive piezo tone; try 2000-4000 Hz for best volume
+static const uint8_t  BUZZER_PWM_BITS     = 8;
+static const uint8_t  BUZZER_PWM_DUTY     = 128;                 // 50% duty at 8-bit resolution
 static const uint32_t WARN_BEEP_MS        = 60UL * 1000UL;
 static const uint32_t TRIGGER_BEEP_MS     = 15UL * 1000UL;
 static const uint32_t BEEP_ON_MS          = 250UL;
@@ -169,7 +173,18 @@ void setLedStates(bool okOn, bool warnOn, bool alertOn) {
 
 void setBuzzerOutput(bool on) {
   buzzerOutputOn = on;
-  if (BUZZER_PIN >= 0) {
+  if (BUZZER_PIN < 0) return;
+
+  if (BUZZER_IS_PASSIVE) {
+    if (on) {
+      ledcWriteTone(BUZZER_PIN, BUZZER_TONE_HZ);
+      ledcWrite(BUZZER_PIN, BUZZER_PWM_DUTY);
+    } else {
+      ledcWriteTone(BUZZER_PIN, 0);
+      ledcWrite(BUZZER_PIN, 0);
+      digitalWrite(BUZZER_PIN, LOW);
+    }
+  } else {
     digitalWrite(BUZZER_PIN, (on == BUZZER_ACTIVE_HIGH) ? HIGH : LOW);
   }
 }
@@ -658,7 +673,11 @@ void setup() {
   if (LED_WARN_PIN >= 0) pinMode(LED_WARN_PIN, OUTPUT);
   if (LED_ALERT_PIN >= 0) pinMode(LED_ALERT_PIN, OUTPUT);
   if (BUZZER_PIN >= 0) {
-    pinMode(BUZZER_PIN, OUTPUT);
+    if (BUZZER_IS_PASSIVE) {
+      ledcAttach(BUZZER_PIN, BUZZER_TONE_HZ, BUZZER_PWM_BITS);
+    } else {
+      pinMode(BUZZER_PIN, OUTPUT);
+    }
     setBuzzerOutput(false);
   }
 

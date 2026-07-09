@@ -55,8 +55,21 @@ Set any unused external LED pin to `-1`. External LEDs are active HIGH and
 should be wired through 330-1k resistors.
 
 Optional buzzer/sounder support is also built in. Set `BUZZER_PIN` in
-`HoF_Alert.ino` to the GPIO connected to an active buzzer module, or leave it
-as `-1` to disable sound. The default behaviour is:
+`HoF_Alert.ino` to the GPIO connected to the buzzer, or leave it as `-1` to
+disable sound.
+
+Two buzzer types are supported:
+
+- passive ceramic piezo disc: set `BUZZER_IS_PASSIVE` to `true`; the ESP32
+  drives an LEDC PWM tone, defaulting to `BUZZER_TONE_HZ = 2800`
+- active buzzer module: set `BUZZER_IS_PASSIVE` to `false`; the ESP32 drives
+  the pin HIGH/LOW using `BUZZER_ACTIVE_HIGH`
+
+For a bare piezo disc, try `BUZZER_TONE_HZ` values between 2000 and 4000 Hz
+to find the loudest resonance in the case. For more volume, drive the disc
+through a small transistor rather than loading the ESP32 GPIO directly.
+
+The default sound behaviour is:
 
 - amber / warning state: intermittent beep for 60 seconds
 - HOF active / triggered state: intermittent beep for 15 seconds

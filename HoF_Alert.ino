@@ -104,7 +104,8 @@ bool        haveConfig    = false;
 uint8_t     consecFails   = 0;
 SoundAlertLevel soundLastTarget    = SOUND_NONE;
 SoundAlertLevel soundRunningLevel  = SOUND_NONE;
-uint32_t    soundUntilMs           = 0;
+uint32_t    soundStartedMs         = 0;
+uint32_t    soundDurationMs        = 0;
 uint32_t    soundLastStartedAt     = 0;
 uint32_t    soundSilencedUntil     = 0;
 bool        buzzerOutputOn         = false;
@@ -202,18 +203,26 @@ void saveSoundState() {
 }
 
 void stopSounder() {
+  if (soundRunningLevel != SOUND_NONE) {
+    Serial.printf("[sound] stop %s after %lu s\n",
+                  soundLevelName(soundRunningLevel),
+                  (millis() - soundStartedMs) / 1000UL);
+  }
   soundRunningLevel = SOUND_NONE;
-  soundUntilMs = 0;
+  soundStartedMs = 0;
+  soundDurationMs = 0;
   setBuzzerOutput(false);
 }
 
 void startSounder(SoundAlertLevel level) {
   if (BUZZER_PIN < 0 || level == SOUND_NONE) return;
   soundRunningLevel = level;
-  soundUntilMs = millis() + (level == SOUND_TRIGGER ? TRIGGER_BEEP_MS : WARN_BEEP_MS);
+  soundStartedMs = millis();
+  soundDurationMs = level == SOUND_TRIGGER ? TRIGGER_BEEP_MS : WARN_BEEP_MS;
   uint32_t now = nowEpoch32();
   soundLastStartedAt = now > 0 ? now : 1;
   setBuzzerOutput(true);
+  Serial.printf("[sound] start %s for %lu s\n", soundLevelName(level), soundDurationMs / 1000UL);
   saveSoundState();
 }
 
@@ -247,11 +256,12 @@ void updateSounder() {
   }
 
   if (soundRunningLevel != SOUND_NONE) {
-    if ((int32_t)(millis() - soundUntilMs) >= 0) {
+    uint32_t elapsed = millis() - soundStartedMs;
+    if (elapsed >= soundDurationMs) {
       stopSounder();
       return;
     }
-    uint32_t phase = millis() % BEEP_PERIOD_MS;
+    uint32_t phase = elapsed % BEEP_PERIOD_MS;
     setBuzzerOutput(phase < BEEP_ON_MS);
     return;
   }
@@ -575,9 +585,15 @@ void handleStatus() {
   doc["uptimeMin"]  = millis() / 60000UL;
   doc["nextPollS"]  = haveConfig ? (int)((POLL_INTERVAL_MS - (millis() - lastPoll)) / 1000) : -1;
   SoundAlertLevel soundTarget = currentSoundTarget();
+  uint32_t soundRemainingS = 0;
+  if (soundRunningLevel != SOUND_NONE && soundDurationMs > 0) {
+    uint32_t elapsed = millis() - soundStartedMs;
+    soundRemainingS = elapsed >= soundDurationMs ? 0 : (soundDurationMs - elapsed) / 1000UL;
+  }
   doc["sounderEnabled"] = BUZZER_PIN >= 0;
   doc["soundTarget"] = soundLevelName(soundTarget);
   doc["soundActive"] = soundRunningLevel != SOUND_NONE;
+  doc["soundRemainingS"] = (int)soundRemainingS;
   doc["soundMutedUntil"] = soundSilencedUntil;
   doc["soundCanAck"] = (BUZZER_PIN >= 0) && (soundTarget != SOUND_NONE);
   JsonArray arr = doc["sites"].to<JsonArray>();

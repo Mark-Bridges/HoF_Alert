@@ -595,7 +595,7 @@ async function refreshStatus(){
     const soundBar=document.getElementById('soundBar');
     if(d.sounderEnabled&&d.soundTarget&&d.soundTarget!=='none'){
       const label=d.soundTarget==='hof_active'?'HOF active sounder':'Amber warning sounder';
-      const status=d.soundActive?'beeping now':'armed';
+      const status=d.soundActive?`beeping now (${Math.max(0,d.soundRemainingS||0)} s left)`:'armed';
       let muted='';
       if(d.soundMutedUntil){
         const until=new Date(d.soundMutedUntil*1000);

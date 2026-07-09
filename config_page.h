@@ -93,10 +93,15 @@ button:disabled{opacity:.5;cursor:default}
 .sparkline .base{stroke:#d8e3e1;stroke-width:1}
 .sparkline .threshold{stroke:var(--line);stroke-width:1.2;stroke-dasharray:2 2}
 .spark-empty{font-size:.8rem;color:var(--mut)}
+.soundbar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#f8fbfa}
+.soundbar .hint{margin:0}
+.soundbar button{white-space:nowrap}
 footer{color:var(--mut);font-size:.78rem;margin-top:24px}
 @media (max-width:760px){
   .menu{position:sticky;top:0;background:var(--paper);padding:8px 0;z-index:10}
   .hist-grid{grid-template-columns:1fr}
+  .soundbar{align-items:stretch;flex-direction:column}
 }
 </style>
 </head>
@@ -124,6 +129,7 @@ footer{color:var(--mut);font-size:.78rem;margin-top:24px}
 <div class="card" id="statusCard" hidden>
   <h2>Device status</h2>
   <div id="boards"></div>
+  <div id="soundBar" class="soundbar" hidden></div>
   <p class="hint" id="statusMeta"></p>
 </div>
 
@@ -488,6 +494,11 @@ async function testAlert(){
   msg.className=r.ok?'msg ok':'msg err';
 }
 
+async function ackSound(){
+  const r=await fetch('/ack-sound',{method:'POST'});
+  if(r.ok) setTimeout(refreshStatus,300);
+}
+
 function buildConfig(draft){
   const out={ntfyTopic:document.getElementById('topic').value.trim(),sites:[]};
   for(let i=0;i<N;i++){
@@ -531,6 +542,8 @@ async function refreshStatus(){
     if(!d.haveConfig){
       if(currentView==='monitor') document.getElementById('monitorIntro').textContent='No active monitor yet. Configure stations and notifications in Settings.';
       document.getElementById('hofOverview').textContent='';
+      document.getElementById('soundBar').hidden=true;
+      document.getElementById('soundBar').innerHTML='';
       return;
     }
     document.getElementById('monitorIntro').textContent='Live status, trend and alert-band state for each configured station.';
@@ -579,6 +592,22 @@ async function refreshStatus(){
       b.appendChild(div);
     }
     document.getElementById('hofOverview').textContent=overview.length?`Configured HoF thresholds: ${overview.join(' | ')}`:'';
+    const soundBar=document.getElementById('soundBar');
+    if(d.sounderEnabled&&d.soundTarget&&d.soundTarget!=='none'){
+      const label=d.soundTarget==='hof_active'?'HOF active sounder':'Amber warning sounder';
+      const status=d.soundActive?'beeping now':'armed';
+      let muted='';
+      if(d.soundMutedUntil){
+        const until=new Date(d.soundMutedUntil*1000);
+        if(until.getTime()>Date.now()) muted=` Silenced until ${until.toLocaleString()}.`;
+      }
+      soundBar.hidden=false;
+      soundBar.innerHTML=`<p class="hint"><strong>${label}</strong> is ${status}.${muted}</p>
+        <button class="ghost" type="button" onclick="ackSound()">Acknowledge sounder</button>`;
+    }else{
+      soundBar.hidden=true;
+      soundBar.innerHTML='';
+    }
     document.getElementById('statusMeta').textContent=
       `Up ${d.uptimeMin} min · next check in ${Math.max(0,Math.round(d.nextPollS/60))} min`;
   }catch(e){}

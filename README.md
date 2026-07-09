@@ -54,6 +54,15 @@ Optional external GPIO LEDs are still supported by changing these constants in
 Set any unused external LED pin to `-1`. External LEDs are active HIGH and
 should be wired through 330-1k resistors.
 
+Optional buzzer/sounder support is also built in. Set `BUZZER_PIN` in
+`HoF_Alert.ino` to the GPIO connected to an active buzzer module, or leave it
+as `-1` to disable sound. The default behaviour is:
+
+- amber / warning state: intermittent beep for 60 seconds
+- HOF active / triggered state: intermittent beep for 15 seconds
+- Monitor page: **Acknowledge sounder** silences the current sounder alert
+- if the condition remains active, the sounder re-arms after 24 hours
+
 ## Build & flash
 
 1. Arduino IDE (or arduino-cli) with the **Arduino-ESP32 core 3.x** installed.

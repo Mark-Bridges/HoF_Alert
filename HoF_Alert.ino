@@ -60,12 +60,20 @@ static const uint8_t  RGB_LED_PIN         = HOF_RGB_LED_PIN;
 static const int8_t   LED_OK_PIN          = -1;                  // optional external green LED, active HIGH
 static const int8_t   LED_WARN_PIN        = -1;                  // optional external amber LED, active HIGH
 static const int8_t   LED_ALERT_PIN       = -1;                  // optional external red LED, active HIGH
+static const int8_t   BUZZER_PIN          = 4;                  // optional active buzzer/sounder, active HIGH
+static const bool     BUZZER_ACTIVE_HIGH  = true;
+static const uint32_t WARN_BEEP_MS        = 60UL * 1000UL;
+static const uint32_t TRIGGER_BEEP_MS     = 15UL * 1000UL;
+static const uint32_t BEEP_ON_MS          = 250UL;
+static const uint32_t BEEP_PERIOD_MS      = 1000UL;
+static const uint32_t SOUND_REARM_SECS    = 24UL * 60UL * 60UL;
 static const char*    EA_HOST            = "environment.data.gov.uk";
 static const char*    NTFY_HOST          = "https://ntfy.sh/";
 static const char*    HOSTNAME           = "ea-hof";
 
 // Alert state machine
 enum SiteState : uint8_t { ARMED = 0, WARNED = 1, TRIGGERED = 2 };
+enum SoundAlertLevel : uint8_t { SOUND_NONE = 0, SOUND_WARN = 1, SOUND_TRIGGER = 2 };
 
 struct Site {
   bool    enabled      = false;
@@ -94,6 +102,12 @@ WebServer   server(80);
 uint32_t    lastPoll      = 0;
 bool        haveConfig    = false;
 uint8_t     consecFails   = 0;
+SoundAlertLevel soundLastTarget    = SOUND_NONE;
+SoundAlertLevel soundRunningLevel  = SOUND_NONE;
+uint32_t    soundUntilMs           = 0;
+uint32_t    soundLastStartedAt     = 0;
+uint32_t    soundSilencedUntil     = 0;
+bool        buzzerOutputOn         = false;
 
 // ---------------------------------------------------------------- utilities
 
@@ -152,6 +166,106 @@ void setLedStates(bool okOn, bool warnOn, bool alertOn) {
   if (LED_ALERT_PIN >= 0) digitalWrite(LED_ALERT_PIN, alertOn ? HIGH : LOW);
 }
 
+void setBuzzerOutput(bool on) {
+  buzzerOutputOn = on;
+  if (BUZZER_PIN >= 0) {
+    digitalWrite(BUZZER_PIN, (on == BUZZER_ACTIVE_HIGH) ? HIGH : LOW);
+  }
+}
+
+SoundAlertLevel currentSoundTarget() {
+  SoundAlertLevel target = SOUND_NONE;
+  for (auto& s : sites) {
+    if (!s.enabled || s.staleNotified) continue;
+    if (s.state == TRIGGERED) return SOUND_TRIGGER;
+    if (s.state == WARNED) target = SOUND_WARN;
+  }
+  return target;
+}
+
+const char* soundLevelName(SoundAlertLevel level) {
+  if (level == SOUND_TRIGGER) return "hof_active";
+  if (level == SOUND_WARN) return "amber";
+  return "none";
+}
+
+uint32_t nowEpoch32() {
+  time_t now = time(nullptr);
+  return now > 1600000000 ? (uint32_t)now : 0;
+}
+
+void saveSoundState() {
+  prefs.begin("eahof", false);
+  prefs.putUInt("bLast", soundLastStartedAt);
+  prefs.putUInt("bMute", soundSilencedUntil);
+  prefs.end();
+}
+
+void stopSounder() {
+  soundRunningLevel = SOUND_NONE;
+  soundUntilMs = 0;
+  setBuzzerOutput(false);
+}
+
+void startSounder(SoundAlertLevel level) {
+  if (BUZZER_PIN < 0 || level == SOUND_NONE) return;
+  soundRunningLevel = level;
+  soundUntilMs = millis() + (level == SOUND_TRIGGER ? TRIGGER_BEEP_MS : WARN_BEEP_MS);
+  uint32_t now = nowEpoch32();
+  soundLastStartedAt = now > 0 ? now : 1;
+  setBuzzerOutput(true);
+  saveSoundState();
+}
+
+void acknowledgeSounder() {
+  uint32_t now = nowEpoch32();
+  soundSilencedUntil = now > 0 ? now + SOUND_REARM_SECS : 0;
+  stopSounder();
+  saveSoundState();
+}
+
+void updateSounder() {
+  SoundAlertLevel target = currentSoundTarget();
+  uint32_t now = nowEpoch32();
+
+  if (target == SOUND_NONE) {
+    if (soundLastTarget != SOUND_NONE || soundLastStartedAt != 0 || soundSilencedUntil != 0) {
+      soundLastStartedAt = 0;
+      soundSilencedUntil = 0;
+      saveSoundState();
+    }
+    soundLastTarget = SOUND_NONE;
+    stopSounder();
+    return;
+  }
+
+  if (target != soundLastTarget) {
+    soundLastTarget = target;
+    soundLastStartedAt = 0;
+    soundSilencedUntil = 0;
+    saveSoundState();
+  }
+
+  if (soundRunningLevel != SOUND_NONE) {
+    if ((int32_t)(millis() - soundUntilMs) >= 0) {
+      stopSounder();
+      return;
+    }
+    uint32_t phase = millis() % BEEP_PERIOD_MS;
+    setBuzzerOutput(phase < BEEP_ON_MS);
+    return;
+  }
+
+  if (now > 0 && soundSilencedUntil > now) return;
+  if (soundLastStartedAt == 1 && now > 0) {
+    soundLastStartedAt = now;
+    saveSoundState();
+  }
+  bool due = soundLastStartedAt == 0 ||
+             (now > 0 && soundLastStartedAt > 1 && now - soundLastStartedAt >= SOUND_REARM_SECS);
+  if (due) startSounder(target);
+}
+
 void refreshStatusOutputs() {
   bool okOn = false, warnOn = false, alertOn = false;
   for (auto& s : sites) {
@@ -165,6 +279,7 @@ void refreshStatusOutputs() {
     }
   }
   setLedStates(okOn, warnOn, alertOn);
+  updateSounder();
 }
 
 String trendLabel(const Site& s) {
@@ -372,6 +487,8 @@ void loadRuntimeState() {
     sites[i].state         = (SiteState)prefs.getUChar(("st" + String(i)).c_str(), ARMED);
     sites[i].staleNotified = prefs.getBool(("sn" + String(i)).c_str(), false);
   }
+  soundLastStartedAt = prefs.getUInt("bLast", 0);
+  soundSilencedUntil = prefs.getUInt("bMute", 0);
   prefs.end();
 }
 
@@ -429,7 +546,12 @@ void handleSave() {
   if (!applyConfigJson(body, true)) { server.send(400, "text/plain", "Bad JSON"); return; }
   // Reset alert states for a fresh config and poll immediately.
   for (auto& s : sites) { s.state = ARMED; s.staleNotified = false; s.everPolled = false; }
+  soundLastTarget = SOUND_NONE;
+  soundLastStartedAt = 0;
+  soundSilencedUntil = 0;
+  stopSounder();
   saveRuntimeState();
+  saveSoundState();
   refreshStatusOutputs();
   server.send(200, "application/json", "{\"ok\":true}");
   lastPoll = 0; // force poll on next loop
@@ -442,11 +564,22 @@ void handleTest() {
   server.send(ok ? 200 : 502, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
+void handleAckSound() {
+  acknowledgeSounder();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 void handleStatus() {
   JsonDocument doc;
   doc["haveConfig"] = haveConfig;
   doc["uptimeMin"]  = millis() / 60000UL;
   doc["nextPollS"]  = haveConfig ? (int)((POLL_INTERVAL_MS - (millis() - lastPoll)) / 1000) : -1;
+  SoundAlertLevel soundTarget = currentSoundTarget();
+  doc["sounderEnabled"] = BUZZER_PIN >= 0;
+  doc["soundTarget"] = soundLevelName(soundTarget);
+  doc["soundActive"] = soundRunningLevel != SOUND_NONE;
+  doc["soundMutedUntil"] = soundSilencedUntil;
+  doc["soundCanAck"] = (BUZZER_PIN >= 0) && (soundTarget != SOUND_NONE);
   JsonArray arr = doc["sites"].to<JsonArray>();
   static const char* names[] = {"armed", "warned", "TRIGGERED"};
   for (auto& s : sites) {
@@ -508,6 +641,10 @@ void setup() {
   if (LED_OK_PIN >= 0)   pinMode(LED_OK_PIN, OUTPUT);
   if (LED_WARN_PIN >= 0) pinMode(LED_WARN_PIN, OUTPUT);
   if (LED_ALERT_PIN >= 0) pinMode(LED_ALERT_PIN, OUTPUT);
+  if (BUZZER_PIN >= 0) {
+    pinMode(BUZZER_PIN, OUTPUT);
+    setBuzzerOutput(false);
+  }
 
   WiFiManager wm;
   wm.setHostname(HOSTNAME);
@@ -524,6 +661,7 @@ void setup() {
   server.on("/config",  HTTP_GET,  handleGetConfig);
   server.on("/save",    HTTP_POST, handleSave);
   server.on("/test",    HTTP_POST, handleTest);
+  server.on("/ack-sound", HTTP_POST, handleAckSound);
   server.on("/status",  HTTP_GET,  handleStatus);
   server.begin();
 
@@ -537,5 +675,6 @@ void loop() {
     lastPoll = millis();
     pollAll();
   }
+  updateSounder();
   delay(10);
 }

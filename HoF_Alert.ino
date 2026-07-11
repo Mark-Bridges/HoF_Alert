@@ -48,15 +48,20 @@ static const uint32_t POLL_INTERVAL_MS   = 15UL * 60UL * 1000UL; // EA updates ~
 static const uint32_t STALE_AFTER_SECS   = 3UL * 60UL * 60UL;    // default: 3 hours
 static const uint8_t  MAX_SITES          = 2;                    // hook for a second licence point
 static const uint8_t  MAX_CONSEC_FAILS   = 8;                    // reboot after ~2 h of failed polls
-static const bool     USE_BUILTIN_RGB_LED = true;                // ESP32-S3-DevKitC-1 addressable RGB LED
+static const bool     USE_BUILTIN_RGB_LED = true;                // onboard addressable RGB LED
+#define HOF_BOARD_ESP32_C3_ZERO 1                                // Waveshare ESP32-C3-Zero: WS2812 on GPIO10
+
 #ifndef HOF_RGB_LED_PIN
-#if defined(RGB_BUILTIN)
+#if HOF_BOARD_ESP32_C3_ZERO
+#define HOF_RGB_LED_PIN 10
+#elif defined(RGB_BUILTIN)
 #define HOF_RGB_LED_PIN RGB_BUILTIN
 #else
 #define HOF_RGB_LED_PIN 38                                      // ESP32-S3-DevKitC-1 v1.1; use 48 for v1.0
 #endif
 #endif
 static const uint8_t  RGB_LED_PIN         = HOF_RGB_LED_PIN;
+static const bool     RGB_LED_SELF_TEST   = true;                // brief red/green/blue check at boot
 static const int8_t   LED_OK_PIN          = -1;                  // optional external green LED, active HIGH
 static const int8_t   LED_WARN_PIN        = -1;                  // optional external amber LED, active HIGH
 static const int8_t   LED_ALERT_PIN       = -1;                  // optional external red LED, active HIGH
@@ -66,11 +71,12 @@ static const bool     BUZZER_ACTIVE_HIGH  = true;                // active modul
 static const uint32_t BUZZER_TONE_HZ      = 2800;                // passive piezo tone; try 2000-4000 Hz for best volume
 static const uint8_t  BUZZER_PWM_BITS     = 8;
 static const uint8_t  BUZZER_PWM_DUTY     = 128;                 // 50% duty at 8-bit resolution
-static const uint32_t WARN_BEEP_MS        = 60UL * 1000UL;
-static const uint32_t TRIGGER_BEEP_MS     = 15UL * 1000UL;
+static const bool     BUZZER_SELF_TEST    = true;                // short chirp at boot to confirm wiring
+static const uint32_t WARN_BEEP_MS        = 30UL * 1000UL;
+static const uint32_t TRIGGER_BEEP_MS     = 30UL * 1000UL;
 static const uint32_t BEEP_ON_MS          = 250UL;
 static const uint32_t BEEP_PERIOD_MS      = 1000UL;
-static const uint32_t SOUND_REARM_SECS    = 24UL * 60UL * 60UL;
+static const uint32_t SOUND_REARM_SECS    = POLL_INTERVAL_MS / 1000UL; // repeat once per EA fetch interval
 static const char*    EA_HOST            = "environment.data.gov.uk";
 static const char*    NTFY_HOST          = "https://ntfy.sh/";
 static const char*    HOSTNAME           = "ea-hof";
@@ -158,6 +164,18 @@ void setRgbStatus(uint8_t red, uint8_t green, uint8_t blue) {
   if (USE_BUILTIN_RGB_LED) neopixelWrite(RGB_LED_PIN, red, green, blue);
 }
 
+void runRgbSelfTest() {
+  if (!USE_BUILTIN_RGB_LED || !RGB_LED_SELF_TEST) return;
+  setRgbStatus(48, 0, 0);
+  delay(250);
+  setRgbStatus(0, 48, 0);
+  delay(250);
+  setRgbStatus(0, 0, 48);
+  delay(250);
+  setRgbStatus(0, 0, 0);
+  delay(100);
+}
+
 void setLedStates(bool okOn, bool warnOn, bool alertOn) {
   if (USE_BUILTIN_RGB_LED) {
     if (alertOn)      setRgbStatus(48, 0, 0);
@@ -187,6 +205,31 @@ void setBuzzerOutput(bool on) {
   } else {
     digitalWrite(BUZZER_PIN, (on == BUZZER_ACTIVE_HIGH) ? HIGH : LOW);
   }
+}
+
+void playBuzzerTone(uint32_t frequencyHz, uint32_t durationMs) {
+  if (BUZZER_PIN < 0) return;
+  if (BUZZER_IS_PASSIVE) {
+    ledcWriteTone(BUZZER_PIN, frequencyHz);
+    ledcWrite(BUZZER_PIN, BUZZER_PWM_DUTY);
+    delay(durationMs);
+    ledcWriteTone(BUZZER_PIN, 0);
+    ledcWrite(BUZZER_PIN, 0);
+    digitalWrite(BUZZER_PIN, LOW);
+  } else {
+    digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? HIGH : LOW);
+    delay(durationMs);
+    digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? LOW : HIGH);
+  }
+}
+
+void runBuzzerSelfTest() {
+  if (!BUZZER_SELF_TEST || BUZZER_PIN < 0) return;
+  playBuzzerTone(2200, 160);
+  delay(80);
+  playBuzzerTone(2800, 160);
+  delay(80);
+  playBuzzerTone(3600, 160);
 }
 
 SoundAlertLevel currentSoundTarget() {
@@ -668,6 +711,14 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
+  if (USE_BUILTIN_RGB_LED) {
+    pinMode(RGB_LED_PIN, OUTPUT);
+    digitalWrite(RGB_LED_PIN, LOW);
+    delay(20);
+  }
+  setRgbStatus(0, 0, 0);
+  delay(20);
+  runRgbSelfTest();
   setRgbStatus(0, 0, 24);
   if (LED_OK_PIN >= 0)   pinMode(LED_OK_PIN, OUTPUT);
   if (LED_WARN_PIN >= 0) pinMode(LED_WARN_PIN, OUTPUT);
@@ -679,6 +730,7 @@ void setup() {
       pinMode(BUZZER_PIN, OUTPUT);
     }
     setBuzzerOutput(false);
+    runBuzzerSelfTest();
   }
 
   WiFiManager wm;

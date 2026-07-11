@@ -26,17 +26,42 @@ level approaches or crosses a Hands-Off Flow / Hands-Off Level condition.
 
 ## Hardware
 
-Target board: **ESP32-S3-DevKitC-1 N16R8**, USB power.
+This sketch can be used with two planned hardware profiles:
+
+- **Waveshare ESP32-C3-Zero**: compact HoF alert node.
+- **ESP32-S3-DevKitC-1 N16R8**: larger future build with more headroom for
+  water-meter functionality and expansion.
+
+### ESP32-C3-Zero
+
+The current firmware profile targets the **Waveshare ESP32-C3-Zero**.
 
 No extra LED hardware is required. The sketch uses the board's built-in
-addressable RGB LED. It uses Arduino's `RGB_BUILTIN` pin when the selected
-board profile provides it, otherwise it defaults to GPIO38 for the current
-ESP32-S3-DevKitC-1 v1.1 hardware.
+WS2812 RGB LED on GPIO10.
 
-If your board is an initial ESP32-S3-DevKitC-1 revision and the LED does not
-light, change `HOF_RGB_LED_PIN` / `RGB_LED_PIN` in `HoF_Alert.ino` to GPIO48.
+In `HoF_Alert.ino`, use:
 
-LED states:
+```cpp
+#define HOF_BOARD_ESP32_C3_ZERO 1
+```
+
+### ESP32-S3-DevKitC-1 N16R8
+
+For the ESP32-S3-DevKitC-1 N16R8, change the board selector in
+`HoF_Alert.ino`:
+
+```cpp
+#define HOF_BOARD_ESP32_C3_ZERO 0
+```
+
+The fallback then uses Arduino's `RGB_BUILTIN` pin when available, or GPIO38
+for ESP32-S3-DevKitC-1 v1.1. Initial ESP32-S3-DevKitC-1 boards may need GPIO48.
+
+The S3 board is the better choice for the later expanded system because it has
+more flash, PSRAM, and GPIO capacity for water-meter inputs, local logging,
+display options, or additional communications.
+
+### LED states
 
 - blue = boot / Wi-Fi setup in progress
 - green = configured, polled, and armed
@@ -58,6 +83,17 @@ Optional buzzer/sounder support is also built in. Set `BUZZER_PIN` in
 `HoF_Alert.ino` to the GPIO connected to the buzzer, or leave it as `-1` to
 disable sound.
 
+For the current ESP32-C3-Zero test build:
+
+- `BUZZER_PIN = 4`
+- ceramic disc `+` pad to GPIO4
+- ceramic disc `-` pad to GND
+- `BUZZER_IS_PASSIVE = true`
+- `BUZZER_SELF_TEST = true`
+
+On boot, the sketch plays a short three-tone chirp so the wiring can be tested
+without waiting for a warning or trigger state.
+
 Two buzzer types are supported:
 
 - passive ceramic piezo disc: set `BUZZER_IS_PASSIVE` to `true`; the ESP32
@@ -67,14 +103,17 @@ Two buzzer types are supported:
 
 For a bare piezo disc, try `BUZZER_TONE_HZ` values between 2000 and 4000 Hz
 to find the loudest resonance in the case. For more volume, drive the disc
-through a small transistor rather than loading the ESP32 GPIO directly.
+from a small piezo driver or a two-pin push-pull output stage rather than a
+single ESP32 GPIO. A 12 mm passive ceramic disc connected directly from one
+GPIO to GND can be quiet unless it is mounted to a resonant case or sound hole.
 
 The default sound behaviour is:
 
-- amber / warning state: intermittent beep for 60 seconds
-- HOF active / triggered state: intermittent beep for 15 seconds
+- amber / warning state: intermittent beep for 30 seconds
+- HOF active / triggered state: intermittent beep for 30 seconds
 - Monitor page: **Acknowledge sounder** silences the current sounder alert
-- if the condition remains active, the sounder re-arms after 24 hours
+- if the condition remains active, the sounder re-arms on the next EA fetch
+  interval, normally every 15 minutes
 
 ## Build & flash
 
@@ -82,10 +121,22 @@ The default sound behaviour is:
 2. Library Manager → install:
    - **ArduinoJson** (Benoit Blanchon), v7.x
    - **WiFiManager** (tzapu), v2.x
-3. Open `HoF_Alert.ino`, select **ESP32S3 Dev Module** or the matching
-   **ESP32-S3-DevKitC-1** entry if available, then flash.
+3. Select the board profile below, then flash `HoF_Alert.ino`.
 
-Suggested Arduino IDE board settings for ESP32-S3-DevKitC-1 N16R8:
+### ESP32-C3-Zero settings
+
+- Flash Size: `4MB`
+- PSRAM: disabled
+- USB CDC On Boot: enabled
+- Upload Mode: USB-CDC / internal USB, if shown
+
+The ESP32-C3-Zero has no separate USB-to-UART chip. If flashing fails, hold
+the BOOT button, plug in USB-C, then start the upload.
+
+### ESP32-S3-DevKitC-1 N16R8 settings
+
+Select **ESP32S3 Dev Module** or the matching **ESP32-S3-DevKitC-1** entry if
+available.
 
 - Flash Size: `16MB`
 - PSRAM: `OPI PSRAM` / enabled
